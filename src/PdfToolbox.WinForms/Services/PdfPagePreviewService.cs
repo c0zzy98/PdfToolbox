@@ -10,6 +10,7 @@ namespace PdfToolbox.Services;
 public sealed class PdfPagePreviewService
 {
     private static readonly TimeSpan RenderTimeout = TimeSpan.FromSeconds(15);
+    private const long MaxPreviewPixels = 16_000_000;
 
     public async Task<RenderedPdfPage> RenderPreviewAsync(
         PdfDocumentInfo document,
@@ -23,6 +24,7 @@ public sealed class PdfPagePreviewService
         var scale = Math.Min(maxWidth / pageInfo.PageSizePoints.Width, maxHeight / pageInfo.PageSizePoints.Height);
         var targetWidth = Math.Max(1, (int)Math.Ceiling(pageInfo.PageSizePoints.Width * scale));
         var targetHeight = Math.Max(1, (int)Math.Ceiling(pageInfo.PageSizePoints.Height * scale));
+        (targetWidth, targetHeight) = LimitPreviewSize(targetWidth, targetHeight);
         return await RenderAsync(document.Path, pageNumber, targetWidth, targetHeight, pageInfo, cancellationToken).ConfigureAwait(false);
     }
 
@@ -110,6 +112,17 @@ public sealed class PdfPagePreviewService
         {
             throw new UserFacingException("Nie udało się przygotować strony do podglądu.", ex);
         }
+    }
+
+    private static (int Width, int Height) LimitPreviewSize(int width, int height)
+    {
+        var pixels = (long)width * height;
+        if (pixels <= MaxPreviewPixels) return (width, height);
+
+        var reduction = Math.Sqrt(MaxPreviewPixels / (double)pixels);
+        return (
+            Math.Max(1, (int)Math.Floor(width * reduction)),
+            Math.Max(1, (int)Math.Floor(height * reduction)));
     }
 
     private static Process StartRenderer(string pipeName)

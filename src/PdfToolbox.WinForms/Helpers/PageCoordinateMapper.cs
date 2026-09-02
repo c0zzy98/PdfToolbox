@@ -7,7 +7,7 @@ public sealed class PageCoordinateMapper(int padding = 18)
     private const float MinRegionPixels = 12F;
     private readonly int _padding = Math.Max(0, padding);
 
-    public PageViewport GetViewport(Size clientSize, SizeF pageSizePoints, int rotationDegrees, bool fitToWindow)
+    public PageViewport GetViewport(Size clientSize, SizeF pageSizePoints, int rotationDegrees, bool fitToWindow, int zoomPercent = 100)
     {
         var oriented = GetOrientedPageSize(pageSizePoints, rotationDegrees);
         var availableWidth = Math.Max(1F, clientSize.Width - (_padding * 2F));
@@ -23,13 +23,23 @@ public sealed class PageCoordinateMapper(int padding = 18)
         }
         else
         {
-            width = Math.Min(oriented.Width, availableWidth);
-            height = Math.Min(oriented.Height, availableHeight);
+            var zoom = Math.Clamp(zoomPercent, 25, 400) / 100F;
+            width = Math.Max(1F, oriented.Width * 96F / 72F * zoom);
+            height = Math.Max(1F, oriented.Height * 96F / 72F * zoom);
         }
 
-        var x = (clientSize.Width - width) / 2F;
-        var y = (clientSize.Height - height) / 2F;
+        var x = fitToWindow ? (clientSize.Width - width) / 2F : _padding;
+        var y = fitToWindow ? (clientSize.Height - height) / 2F : _padding;
         return new PageViewport(new RectangleF(x, y, width, height), oriented);
+    }
+
+    public Size GetCanvasSize(SizeF pageSizePoints, int rotationDegrees, int zoomPercent)
+    {
+        var oriented = GetOrientedPageSize(pageSizePoints, rotationDegrees);
+        var zoom = Math.Clamp(zoomPercent, 25, 400) / 100F;
+        return new Size(
+            Math.Max(1, (int)Math.Ceiling(oriented.Width * 96F / 72F * zoom) + (_padding * 2)),
+            Math.Max(1, (int)Math.Ceiling(oriented.Height * 96F / 72F * zoom) + (_padding * 2)));
     }
 
     public static SizeF GetOrientedPageSize(SizeF pageSizePoints, int rotationDegrees) =>
@@ -37,9 +47,9 @@ public sealed class PageCoordinateMapper(int padding = 18)
             ? new SizeF(pageSizePoints.Height, pageSizePoints.Width)
             : pageSizePoints;
 
-    public bool TryScreenToNormalized(Point location, Size clientSize, SizeF pageSizePoints, int rotationDegrees, bool fitToWindow, out PointF normalized)
+    public bool TryScreenToNormalized(Point location, Size clientSize, SizeF pageSizePoints, int rotationDegrees, bool fitToWindow, out PointF normalized, int zoomPercent = 100)
     {
-        var viewport = GetViewport(clientSize, pageSizePoints, rotationDegrees, fitToWindow);
+        var viewport = GetViewport(clientSize, pageSizePoints, rotationDegrees, fitToWindow, zoomPercent);
         if (!viewport.Bounds.Contains(location))
         {
             normalized = default;
@@ -52,17 +62,17 @@ public sealed class PageCoordinateMapper(int padding = 18)
         return true;
     }
 
-    public PointF ClampPointToViewport(Point location, Size clientSize, SizeF pageSizePoints, int rotationDegrees, bool fitToWindow)
+    public PointF ClampPointToViewport(Point location, Size clientSize, SizeF pageSizePoints, int rotationDegrees, bool fitToWindow, int zoomPercent = 100)
     {
-        var bounds = GetViewport(clientSize, pageSizePoints, rotationDegrees, fitToWindow).Bounds;
+        var bounds = GetViewport(clientSize, pageSizePoints, rotationDegrees, fitToWindow, zoomPercent).Bounds;
         return new PointF(
             Math.Clamp(location.X, bounds.Left, bounds.Right),
             Math.Clamp(location.Y, bounds.Top, bounds.Bottom));
     }
 
-    public RectangleF NormalizedToScreen(PageRegionSelection region, Size clientSize, SizeF pageSizePoints, int rotationDegrees, bool fitToWindow)
+    public RectangleF NormalizedToScreen(PageRegionSelection region, Size clientSize, SizeF pageSizePoints, int rotationDegrees, bool fitToWindow, int zoomPercent = 100)
     {
-        var viewport = GetViewport(clientSize, pageSizePoints, rotationDegrees, fitToWindow).Bounds;
+        var viewport = GetViewport(clientSize, pageSizePoints, rotationDegrees, fitToWindow, zoomPercent).Bounds;
         return RectangleF.FromLTRB(
             viewport.Left + (float)region.X * viewport.Width,
             viewport.Top + (float)region.Y * viewport.Height,
@@ -79,16 +89,16 @@ public sealed class PageCoordinateMapper(int padding = 18)
         return Rectangle.FromLTRB(left, top, right, bottom);
     }
 
-    public PageRegionSelection? CreateSelection(int pageNumber, Point start, Point end, Size clientSize, SizeF pageSizePoints, int rotationDegrees, bool fitToWindow)
+    public PageRegionSelection? CreateSelection(int pageNumber, Point start, Point end, Size clientSize, SizeF pageSizePoints, int rotationDegrees, bool fitToWindow, int zoomPercent = 100)
     {
-        if (!TryScreenToNormalized(start, clientSize, pageSizePoints, rotationDegrees, fitToWindow, out _))
+        if (!TryScreenToNormalized(start, clientSize, pageSizePoints, rotationDegrees, fitToWindow, out _, zoomPercent))
         {
             return null;
         }
 
-        var clampedStart = ClampPointToViewport(start, clientSize, pageSizePoints, rotationDegrees, fitToWindow);
-        var clampedEnd = ClampPointToViewport(end, clientSize, pageSizePoints, rotationDegrees, fitToWindow);
-        var viewport = GetViewport(clientSize, pageSizePoints, rotationDegrees, fitToWindow).Bounds;
+        var clampedStart = ClampPointToViewport(start, clientSize, pageSizePoints, rotationDegrees, fitToWindow, zoomPercent);
+        var clampedEnd = ClampPointToViewport(end, clientSize, pageSizePoints, rotationDegrees, fitToWindow, zoomPercent);
+        var viewport = GetViewport(clientSize, pageSizePoints, rotationDegrees, fitToWindow, zoomPercent).Bounds;
         var left = Math.Min(clampedStart.X, clampedEnd.X);
         var top = Math.Min(clampedStart.Y, clampedEnd.Y);
         var right = Math.Max(clampedStart.X, clampedEnd.X);

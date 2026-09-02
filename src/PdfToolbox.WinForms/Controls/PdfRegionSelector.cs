@@ -16,6 +16,8 @@ public sealed class PdfRegionSelector : UserControl
     private EditMode _editMode;
     private ResizeHandle _resizeHandle;
     private RectangleF _originalBounds;
+    private bool _fitToWindow = true;
+    private int _zoomPercent = 100;
 
     public PdfRegionSelector()
     {
@@ -32,12 +34,41 @@ public sealed class PdfRegionSelector : UserControl
 
     public event EventHandler? RegionsChanged;
     public event EventHandler? SelectedRegionChanged;
+    public event EventHandler? ViewportModeChanged;
+    public event EventHandler<int>? ZoomRequested;
 
-    public bool FitToWindow { get; set; } = true;
+    public bool FitToWindow
+    {
+        get => _fitToWindow;
+        set
+        {
+            if (_fitToWindow == value) return;
+            _fitToWindow = value;
+            ViewportModeChanged?.Invoke(this, EventArgs.Empty);
+            Invalidate();
+        }
+    }
+
+    public int ZoomPercent
+    {
+        get => _zoomPercent;
+        set
+        {
+            var clamped = Math.Clamp(value, 25, 400);
+            if (_zoomPercent == clamped) return;
+            _zoomPercent = clamped;
+            ViewportModeChanged?.Invoke(this, EventArgs.Empty);
+            Invalidate();
+        }
+    }
 
     public int SelectedRegionIndex { get; private set; } = -1;
 
     public IReadOnlyList<PageRegionSelection> Regions => _regions;
+
+    public Size GetCanvasSize() => _pageSizePoints.Width <= 0 || _pageSizePoints.Height <= 0
+        ? Size.Empty
+        : _mapper.GetCanvasSize(_pageSizePoints, _rotationDegrees, ZoomPercent);
 
     public void SetPage(int pageNumber, Bitmap? previewImage, SizeF pageSizePoints, int rotationDegrees, IReadOnlyCollection<PageRegionSelection> regions)
     {
@@ -84,7 +115,7 @@ public sealed class PdfRegionSelector : UserControl
             return;
         }
 
-        var viewport = _mapper.GetViewport(ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow).Bounds;
+        var viewport = _mapper.GetViewport(ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow, ZoomPercent).Bounds;
         e.Graphics.FillRectangle(Brushes.White, viewport);
         e.Graphics.DrawImage(_previewImage, viewport);
         using var borderPen = new Pen(Color.FromArgb(148, 163, 184), 1.5F);
@@ -92,7 +123,7 @@ public sealed class PdfRegionSelector : UserControl
 
         for (var index = 0; index < _regions.Count; index++)
         {
-            var regionBounds = _mapper.NormalizedToScreen(_regions[index], ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow);
+            var regionBounds = _mapper.NormalizedToScreen(_regions[index], ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow, ZoomPercent);
             var isSelected = index == SelectedRegionIndex;
             using var fill = new SolidBrush(Color.FromArgb(isSelected ? 92 : 62, 37, 99, 235));
             using var pen = new Pen(isSelected ? Color.FromArgb(29, 78, 216) : Theme.Accent, isSelected ? 2.5F : 1.8F);
@@ -124,6 +155,17 @@ public sealed class PdfRegionSelector : UserControl
         Invalidate();
     }
 
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        if ((ModifierKeys & Keys.Control) == Keys.Control)
+        {
+            ZoomRequested?.Invoke(this, e.Delta > 0 ? 25 : -25);
+            return;
+        }
+
+        base.OnMouseWheel(e);
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
@@ -142,7 +184,7 @@ public sealed class PdfRegionSelector : UserControl
         var hit = HitTest(e.Location);
         _dragStart = e.Location;
         _originalBounds = hit.Index >= 0
-            ? _mapper.NormalizedToScreen(_regions[hit.Index], ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow)
+            ? _mapper.NormalizedToScreen(_regions[hit.Index], ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow, ZoomPercent)
             : RectangleF.Empty;
 
         if (hit.Index >= 0)
@@ -155,7 +197,7 @@ public sealed class PdfRegionSelector : UserControl
             return;
         }
 
-        if (_mapper.TryScreenToNormalized(e.Location, ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow, out _))
+        if (_mapper.TryScreenToNormalized(e.Location, ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow, out _, ZoomPercent))
         {
             SelectedRegionIndex = -1;
             _editMode = EditMode.Drawing;
@@ -194,7 +236,7 @@ public sealed class PdfRegionSelector : UserControl
     {
         if (_editMode == EditMode.Drawing)
         {
-            var selection = _mapper.CreateSelection(_pageNumber, _dragStart, e.Location, ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow);
+            var selection = _mapper.CreateSelection(_pageNumber, _dragStart, e.Location, ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow, ZoomPercent);
             if (selection is not null)
             {
                 _regions.Add(selection);
@@ -227,9 +269,9 @@ public sealed class PdfRegionSelector : UserControl
     {
         Invalidate();
         using var graphics = CreateGraphics();
-        var selection = _mapper.CreateSelection(_pageNumber, _dragStart, location, ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow);
+        var selection = _mapper.CreateSelection(_pageNumber, _dragStart, location, ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow, ZoomPercent);
         if (selection is null) return;
-        var bounds = _mapper.NormalizedToScreen(selection, ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow);
+        var bounds = _mapper.NormalizedToScreen(selection, ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow, ZoomPercent);
         using var fill = new SolidBrush(Color.FromArgb(52, 37, 99, 235));
         using var pen = new Pen(Theme.Accent, 1.5F);
         graphics.FillRectangle(fill, bounds);
@@ -239,7 +281,7 @@ public sealed class PdfRegionSelector : UserControl
     private void MoveSelection(Point location)
     {
         if (SelectedRegionIndex < 0) return;
-        var viewport = _mapper.GetViewport(ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow).Bounds;
+        var viewport = _mapper.GetViewport(ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow, ZoomPercent).Bounds;
         var offsetX = location.X - _dragStart.X;
         var offsetY = location.Y - _dragStart.Y;
         var moved = _originalBounds;
@@ -254,9 +296,9 @@ public sealed class PdfRegionSelector : UserControl
     private void ResizeSelection(Point location)
     {
         if (SelectedRegionIndex < 0) return;
-        var viewport = _mapper.GetViewport(ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow).Bounds;
+        var viewport = _mapper.GetViewport(ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow, ZoomPercent).Bounds;
         var bounds = _originalBounds;
-        var clamped = _mapper.ClampPointToViewport(location, ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow);
+        var clamped = _mapper.ClampPointToViewport(location, ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow, ZoomPercent);
 
         switch (_resizeHandle)
         {
@@ -289,7 +331,7 @@ public sealed class PdfRegionSelector : UserControl
 
     private PageRegionSelection ToNormalizedSelection(RectangleF screenBounds)
     {
-        var viewport = _mapper.GetViewport(ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow).Bounds;
+        var viewport = _mapper.GetViewport(ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow, ZoomPercent).Bounds;
         return PageCoordinateMapper.Clamp(new PageRegionSelection(
             _pageNumber,
             (screenBounds.Left - viewport.Left) / viewport.Width,
@@ -302,7 +344,7 @@ public sealed class PdfRegionSelector : UserControl
     {
         for (var index = _regions.Count - 1; index >= 0; index--)
         {
-            var bounds = _mapper.NormalizedToScreen(_regions[index], ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow);
+            var bounds = _mapper.NormalizedToScreen(_regions[index], ClientSize, _pageSizePoints, _rotationDegrees, FitToWindow, ZoomPercent);
             foreach (var pair in GetHandleBounds(bounds))
             {
                 if (pair.Contains(location))

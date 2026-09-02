@@ -75,6 +75,25 @@ public sealed class PageCoordinateMapperTests
         Assert.Equal(region.Height, after.Height / afterViewport.Height, 4);
     }
 
+    [Theory]
+    [InlineData(25)]
+    [InlineData(100)]
+    [InlineData(250)]
+    [InlineData(400)]
+    public void NormalizedToScreen_PreservesTheSamePageRegionAtManualZoom(int zoomPercent)
+    {
+        var pageSize = new SizeF(595, 842);
+        var region = new PageRegionSelection(1, 0.18, 0.32, 0.41, 0.24);
+        var canvas = _mapper.GetCanvasSize(pageSize, 0, zoomPercent);
+        var viewport = _mapper.GetViewport(canvas, pageSize, 0, fitToWindow: false, zoomPercent).Bounds;
+        var screenBounds = _mapper.NormalizedToScreen(region, canvas, pageSize, 0, fitToWindow: false, zoomPercent);
+
+        Assert.Equal(region.X, (screenBounds.Left - viewport.Left) / viewport.Width, 4);
+        Assert.Equal(region.Y, (screenBounds.Top - viewport.Top) / viewport.Height, 4);
+        Assert.Equal(region.Width, screenBounds.Width / viewport.Width, 4);
+        Assert.Equal(region.Height, screenBounds.Height / viewport.Height, 4);
+    }
+
     [Fact]
     public void CreateSelection_HandlesReversedDrag()
     {

@@ -14,13 +14,19 @@ public sealed class RegionExtractionView : UserControl
     private readonly PdfRegionExtractionService _extractionService;
     private readonly LocalLogger _logger;
     private readonly PdfDropZone _dropZone = new() { AllowMultiple = false, Margin = new Padding(0, 0, 0, 14) };
+    private readonly TableLayoutPanel _loadedDocumentPanel = new() { AutoSize = true, Dock = DockStyle.Top, ColumnCount = 2, Margin = new Padding(0, 0, 0, 14), Visible = false };
     private readonly Label _documentLabel = new() { AutoSize = true, ForeColor = Theme.TextPrimary, Margin = new Padding(0, 0, 0, 10) };
+    private readonly Button _changeDocumentButton = new();
     private readonly ComboBox _pageCombo = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 120 };
     private readonly Label _pageSummary = new() { AutoSize = true, ForeColor = Theme.TextPrimary, Margin = new Padding(14, 8, 14, 0) };
     private readonly Button _previousButton = new();
     private readonly Button _nextButton = new();
     private readonly CheckBox _fitToWindow = new() { Text = "Dopasuj do okna", Checked = true, AutoSize = true, Margin = new Padding(18, 8, 0, 0) };
     private readonly PdfRegionSelector _selector = new() { Margin = new Padding(0, 0, 0, 14), MinimumSize = new Size(0, 200) };
+    private readonly Panel _selectorHost = new() { Dock = DockStyle.Fill, BackColor = Theme.Canvas, AutoScroll = true, Padding = new Padding(0, 0, 0, 6) };
+    private readonly Button _zoomOutButton = new();
+    private readonly Label _zoomLabel = new() { AutoSize = true, ForeColor = Theme.TextPrimary, Margin = new Padding(8, 8, 8, 0) };
+    private readonly Button _zoomInButton = new();
     private readonly Button _deleteSelectionButton = new();
     private readonly Button _clearPageButton = new();
     private readonly Label _selectionSummary = new() { AutoSize = true, ForeColor = Theme.TextMuted, Margin = new Padding(0, 10, 0, 0) };
@@ -31,6 +37,7 @@ public sealed class RegionExtractionView : UserControl
     private readonly ProgressView _progressView = new() { Margin = new Padding(0, 10, 0, 0) };
     private readonly Dictionary<int, List<PageRegionSelection>> _regionsByPage = [];
     private readonly Stopwatch _timer = new();
+    private readonly System.Windows.Forms.Timer _zoomRenderTimer = new() { Interval = 200 };
     private CancellationTokenSource? _operationCancellation;
     private CancellationTokenSource? _previewCancellation;
     private PdfDocumentInfo? _document;
@@ -74,6 +81,8 @@ public sealed class RegionExtractionView : UserControl
             _previewCancellation?.Dispose();
             _operationCancellation?.Cancel();
             _operationCancellation?.Dispose();
+            _zoomRenderTimer.Stop();
+            _zoomRenderTimer.Dispose();
             _renderedPage?.Dispose();
         }
 
@@ -87,6 +96,9 @@ public sealed class RegionExtractionView : UserControl
         Theme.ConfigureSecondaryButton(_deleteSelectionButton, "Usuń zaznaczenie", 150);
         Theme.ConfigureSecondaryButton(_clearPageButton, "Wyczyść stronę", 135);
         Theme.ConfigureSecondaryButton(_outputButton, "Wybierz folder", 145);
+        Theme.ConfigureSecondaryButton(_changeDocumentButton, "Zmień dokument", 145);
+        Theme.ConfigureSecondaryButton(_zoomOutButton, "−", 42);
+        Theme.ConfigureSecondaryButton(_zoomInButton, "+", 42);
         Theme.ConfigurePrimaryButton(_actionButton, "WYTNIJ ZAZNACZONE FRAGMENTY", 320);
 
         var root = new TableLayoutPanel
@@ -107,7 +119,15 @@ public sealed class RegionExtractionView : UserControl
 
         Controls.Add(root);
         root.Controls.Add(_dropZone, 0, 0);
-        root.Controls.Add(_documentLabel, 0, 1);
+        _loadedDocumentPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        _loadedDocumentPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _loadedDocumentPanel.BackColor = Color.White;
+        _loadedDocumentPanel.Padding = new Padding(14, 10, 10, 10);
+        _documentLabel.Dock = DockStyle.Fill;
+        _documentLabel.Margin = new Padding(0, 8, 12, 0);
+        _loadedDocumentPanel.Controls.Add(_documentLabel, 0, 0);
+        _loadedDocumentPanel.Controls.Add(_changeDocumentButton, 1, 0);
+        root.Controls.Add(_loadedDocumentPanel, 0, 1);
 
         var nav = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 10) };
         nav.Controls.Add(_previousButton);
@@ -115,12 +135,14 @@ public sealed class RegionExtractionView : UserControl
         nav.Controls.Add(_nextButton);
         nav.Controls.Add(new Label { Text = "Strona:", AutoSize = true, ForeColor = Theme.TextPrimary, Margin = new Padding(18, 8, 6, 0) });
         nav.Controls.Add(_pageCombo);
+        nav.Controls.Add(_zoomOutButton);
+        nav.Controls.Add(_zoomLabel);
+        nav.Controls.Add(_zoomInButton);
         nav.Controls.Add(_fitToWindow);
         root.Controls.Add(nav, 0, 2);
 
-        var selectorHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Canvas, Padding = new Padding(0, 0, 0, 6) };
-        selectorHost.Controls.Add(_selector);
-        root.Controls.Add(selectorHost, 0, 3);
+        _selectorHost.Controls.Add(_selector);
+        root.Controls.Add(_selectorHost, 0, 3);
 
         var tools = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 8) };
         tools.Controls.Add(_deleteSelectionButton);
@@ -142,11 +164,13 @@ public sealed class RegionExtractionView : UserControl
         footer.Controls.Add(_actionButton);
         footer.Controls.Add(_progressView);
         root.Controls.Add(footer, 0, 6);
+        UpdateZoomControls();
     }
 
     private void HookEvents()
     {
         _dropZone.FilesSelected += async (_, paths) => await LoadDocumentAsync(paths[0]);
+        _changeDocumentButton.Click += async (_, _) => await ChooseDocumentAsync();
         _pageCombo.SelectedIndexChanged += async (_, _) =>
         {
             if (_pageCombo.SelectedIndex >= 0)
@@ -170,7 +194,25 @@ public sealed class RegionExtractionView : UserControl
         _fitToWindow.CheckedChanged += (_, _) =>
         {
             _selector.FitToWindow = _fitToWindow.Checked;
-            _selector.Invalidate();
+            AdjustSelectorCanvas();
+            SchedulePreviewRender();
+        };
+        _zoomOutButton.Click += (_, _) => ChangeZoom(-25);
+        _zoomInButton.Click += (_, _) => ChangeZoom(25);
+        _selector.ZoomRequested += (_, delta) => ChangeZoom(delta);
+        _selector.ViewportModeChanged += (_, _) =>
+        {
+            AdjustSelectorCanvas();
+            UpdateZoomControls();
+        };
+        _selectorHost.Resize += (_, _) =>
+        {
+            if (_selector.FitToWindow) _selector.Invalidate();
+        };
+        _zoomRenderTimer.Tick += async (_, _) =>
+        {
+            _zoomRenderTimer.Stop();
+            await RenderCurrentPageAsync();
         };
         _selector.RegionsChanged += (_, _) => PersistCurrentPageRegions();
         _selector.SelectedRegionChanged += (_, _) => UpdateSelectionSummary();
@@ -189,7 +231,8 @@ public sealed class RegionExtractionView : UserControl
             _document = await _validationService.InspectAsync(path, CancellationToken.None).ConfigureAwait(true);
             _regionsByPage.Clear();
             _currentPageNumber = 1;
-            _dropZone.IsCompact = true;
+            _dropZone.Visible = false;
+            _loadedDocumentPanel.Visible = true;
             _outputDirectory = _fileService.GetDefaultOutputDirectory(_document.Path);
             _documentLabel.Text = $"✓  {_document.FileName} — {_document.PageCount} stron, {FormatSize(_document.SizeBytes)}";
             _outputLabel.Text = _outputDirectory;
@@ -197,7 +240,6 @@ public sealed class RegionExtractionView : UserControl
             for (var page = 1; page <= _document.PageCount; page++) _pageCombo.Items.Add(page.ToString());
             _pageCombo.SelectedIndex = 0;
             UpdateNavigationState();
-            await RenderCurrentPageAsync().ConfigureAwait(true);
         }
         catch (UserFacingException ex)
         {
@@ -233,6 +275,7 @@ public sealed class RegionExtractionView : UserControl
             _renderedPage = rendered;
             // The selector owns and disposes this independent display bitmap.
             _selector.SetPage(pageNumber, new Bitmap(rendered.Bitmap), rendered.PageSizePoints, rendered.RotationDegrees, GetRegionsForCurrentPage());
+            AdjustSelectorCanvas();
             _previewStatus.Text = string.Empty;
             UpdateNavigationState();
         }
@@ -374,6 +417,56 @@ public sealed class RegionExtractionView : UserControl
         _outputLabel.Text = _outputDirectory;
     }
 
+    private async Task ChooseDocumentAsync()
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Filter = "Dokumenty PDF (*.pdf)|*.pdf",
+            CheckFileExists = true,
+            Multiselect = false,
+            Title = "Wybierz dokument PDF"
+        };
+        if (dialog.ShowDialog(FindForm()) == DialogResult.OK) await LoadDocumentAsync(dialog.FileName);
+    }
+
+    private void ChangeZoom(int delta)
+    {
+        _fitToWindow.Checked = false;
+        _selector.ZoomPercent = Math.Clamp(_selector.ZoomPercent + delta, 25, 400);
+        SchedulePreviewRender();
+    }
+
+    private void AdjustSelectorCanvas()
+    {
+        if (_selector.FitToWindow)
+        {
+            _selector.Dock = DockStyle.Fill;
+            _selectorHost.AutoScrollMinSize = Size.Empty;
+            return;
+        }
+
+        var canvasSize = _selector.GetCanvasSize();
+        if (canvasSize.IsEmpty) return;
+        _selector.Dock = DockStyle.None;
+        _selector.Location = Point.Empty;
+        _selector.Size = canvasSize;
+        _selectorHost.AutoScrollMinSize = canvasSize;
+    }
+
+    private void SchedulePreviewRender()
+    {
+        if (_document is null) return;
+        _zoomRenderTimer.Stop();
+        _zoomRenderTimer.Start();
+    }
+
+    private void UpdateZoomControls()
+    {
+        _zoomLabel.Text = _selector.FitToWindow ? "Dopasuj" : $"{_selector.ZoomPercent}%";
+        _zoomOutButton.Enabled = !_selector.FitToWindow && _selector.ZoomPercent > 25;
+        _zoomInButton.Enabled = !_selector.FitToWindow && _selector.ZoomPercent < 400;
+    }
+
     private void SetBusy(bool busy)
     {
         _dropZone.Enabled = !busy;
@@ -381,6 +474,8 @@ public sealed class RegionExtractionView : UserControl
         _previousButton.Enabled = !busy && _document is not null && _currentPageNumber > 1;
         _nextButton.Enabled = !busy && _document is not null && _currentPageNumber < _document.PageCount;
         _selector.Enabled = !busy;
+        _zoomOutButton.Enabled = !busy && !_selector.FitToWindow && _selector.ZoomPercent > 25;
+        _zoomInButton.Enabled = !busy && !_selector.FitToWindow && _selector.ZoomPercent < 400;
         _outputButton.Enabled = !busy;
         _actionButton.Enabled = !busy;
         _fitToWindow.Enabled = !busy;

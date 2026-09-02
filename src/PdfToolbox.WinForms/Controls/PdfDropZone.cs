@@ -36,25 +36,7 @@ public sealed class PdfDropZone : UserControl
     }
 
     public bool AllowMultiple { get; set; }
-    public bool IsCompact
-    {
-        get => _isCompact;
-        set
-        {
-            if (_isCompact == value) return;
-
-            _isCompact = value;
-            Height = value ? 56 : 160;
-            _title.Visible = !value;
-            _or.Visible = !value;
-            _chooseButton.Text = value ? "Zmień dokument" : "Wybierz dokument";
-            LayoutChildren();
-        }
-    }
-
     public event EventHandler<IReadOnlyList<string>>? FilesSelected;
-
-    private bool _isCompact;
 
     private void ChooseFiles()
     {
@@ -87,12 +69,6 @@ public sealed class PdfDropZone : UserControl
 
     private void LayoutChildren()
     {
-        if (_isCompact)
-        {
-            _chooseButton.Location = new Point((Width - _chooseButton.Width) / 2, (Height - _chooseButton.Height) / 2);
-            return;
-        }
-
         _title.Location = new Point((Width - _title.Width) / 2, 26);
         _or.Location = new Point((Width - _or.Width) / 2, 67);
         _chooseButton.Location = new Point((Width - _chooseButton.Width) / 2, 91);
