@@ -56,6 +56,26 @@ public sealed class PageCoordinateMapperTests
     }
 
     [Fact]
+    public void NormalizedToScreen_PreservesTheSamePageRegionAfterResize()
+    {
+        var pageSize = new SizeF(595, 842);
+        var region = new PageRegionSelection(1, 0.12, 0.23, 0.45, 0.31);
+        var before = _mapper.NormalizedToScreen(region, new Size(800, 420), pageSize, 0, fitToWindow: true);
+        var after = _mapper.NormalizedToScreen(region, new Size(1600, 900), pageSize, 0, fitToWindow: true);
+        var beforeViewport = _mapper.GetViewport(new Size(800, 420), pageSize, 0, fitToWindow: true).Bounds;
+        var afterViewport = _mapper.GetViewport(new Size(1600, 900), pageSize, 0, fitToWindow: true).Bounds;
+
+        Assert.Equal(region.X, (before.Left - beforeViewport.Left) / beforeViewport.Width, 4);
+        Assert.Equal(region.Y, (before.Top - beforeViewport.Top) / beforeViewport.Height, 4);
+        Assert.Equal(region.Width, before.Width / beforeViewport.Width, 4);
+        Assert.Equal(region.Height, before.Height / beforeViewport.Height, 4);
+        Assert.Equal(region.X, (after.Left - afterViewport.Left) / afterViewport.Width, 4);
+        Assert.Equal(region.Y, (after.Top - afterViewport.Top) / afterViewport.Height, 4);
+        Assert.Equal(region.Width, after.Width / afterViewport.Width, 4);
+        Assert.Equal(region.Height, after.Height / afterViewport.Height, 4);
+    }
+
+    [Fact]
     public void CreateSelection_HandlesReversedDrag()
     {
         var pageSize = new SizeF(595, 842);

@@ -130,6 +130,8 @@ public sealed class MainForm : Form
         ResetState();
         _backButton.Visible = false;
         _windowTitle.Location = new Point(30, 19);
+        _content.AutoScroll = true;
+        _content.Padding = Padding.Empty;
         _content.Controls.Clear();
 
         var root = new TableLayoutPanel
@@ -177,6 +179,8 @@ public sealed class MainForm : Form
         _currentOperation = operation;
         _backButton.Visible = true;
         _windowTitle.Location = new Point(82, 19);
+        _content.AutoScroll = true;
+        _content.Padding = Padding.Empty;
         _content.Controls.Clear();
 
         var root = new TableLayoutPanel
@@ -242,11 +246,12 @@ public sealed class MainForm : Form
         _currentOperation = OperationType.CropRegions;
         _backButton.Visible = true;
         _windowTitle.Location = new Point(82, 19);
+        _content.AutoScroll = false;
+        _content.Padding = new Padding(54, 28, 54, 44);
         _content.Controls.Clear();
         _regionExtractionView = new RegionExtractionView(_fileService, _validation, _previewService, _regionExtractionService, _logger)
         {
-            Dock = DockStyle.Fill,
-            Margin = new Padding(54, 28, 54, 44)
+            Dock = DockStyle.Fill
         };
         _regionExtractionView.Completed += (_, result) => ShowSuccess(result);
         _content.Controls.Add(_regionExtractionView);

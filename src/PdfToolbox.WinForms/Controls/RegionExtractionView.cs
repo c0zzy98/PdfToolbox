@@ -20,7 +20,7 @@ public sealed class RegionExtractionView : UserControl
     private readonly Button _previousButton = new();
     private readonly Button _nextButton = new();
     private readonly CheckBox _fitToWindow = new() { Text = "Dopasuj do okna", Checked = true, AutoSize = true, Margin = new Padding(18, 8, 0, 0) };
-    private readonly PdfRegionSelector _selector = new() { Margin = new Padding(0, 0, 0, 14), MinimumSize = new Size(520, 360) };
+    private readonly PdfRegionSelector _selector = new() { Margin = new Padding(0, 0, 0, 14), MinimumSize = new Size(0, 200) };
     private readonly Button _deleteSelectionButton = new();
     private readonly Button _clearPageButton = new();
     private readonly Label _selectionSummary = new() { AutoSize = true, ForeColor = Theme.TextMuted, Margin = new Padding(0, 10, 0, 0) };
@@ -35,6 +35,7 @@ public sealed class RegionExtractionView : UserControl
     private CancellationTokenSource? _previewCancellation;
     private PdfDocumentInfo? _document;
     private int _currentPageNumber = 1;
+    private int _previewRequestVersion;
     private RenderedPdfPage? _renderedPage;
     private string? _outputDirectory;
 
@@ -178,13 +179,6 @@ public sealed class RegionExtractionView : UserControl
         _outputButton.Click += (_, _) => ChooseOutputDirectory();
         _actionButton.Click += async (_, _) => await ExecuteAsync();
         _progressView.CancelRequested += (_, _) => _operationCancellation?.Cancel();
-        _selector.Resize += async (_, _) =>
-        {
-            if (_document is not null && _renderedPage is not null && Width > 0 && Height > 0)
-            {
-                await RenderCurrentPageAsync();
-            }
-        };
     }
 
     private async Task LoadDocumentAsync(string path)
@@ -195,6 +189,7 @@ public sealed class RegionExtractionView : UserControl
             _document = await _validationService.InspectAsync(path, CancellationToken.None).ConfigureAwait(true);
             _regionsByPage.Clear();
             _currentPageNumber = 1;
+            _dropZone.IsCompact = true;
             _outputDirectory = _fileService.GetDefaultOutputDirectory(_document.Path);
             _documentLabel.Text = $"✓  {_document.FileName} — {_document.PageCount} stron, {FormatSize(_document.SizeBytes)}";
             _outputLabel.Text = _outputDirectory;
@@ -217,6 +212,9 @@ public sealed class RegionExtractionView : UserControl
     private async Task RenderCurrentPageAsync()
     {
         if (_document is null) return;
+        var document = _document;
+        var pageNumber = _currentPageNumber;
+        var requestVersion = ++_previewRequestVersion;
         _previewCancellation?.Cancel();
         _previewCancellation?.Dispose();
         _previewCancellation = new CancellationTokenSource();
@@ -224,10 +222,17 @@ public sealed class RegionExtractionView : UserControl
         try
         {
             var viewport = _selector.ClientSize.Width > 0 && _selector.ClientSize.Height > 0 ? _selector.ClientSize : new Size(900, 560);
-            var rendered = await _previewService.RenderPreviewAsync(_document, _currentPageNumber, viewport, _previewCancellation.Token).ConfigureAwait(true);
+            var rendered = await _previewService.RenderPreviewAsync(document, pageNumber, viewport, _previewCancellation.Token).ConfigureAwait(true);
+            if (IsDisposed || requestVersion != _previewRequestVersion || !ReferenceEquals(document, _document) || pageNumber != _currentPageNumber)
+            {
+                rendered.Dispose();
+                return;
+            }
+
             _renderedPage?.Dispose();
             _renderedPage = rendered;
-            _selector.SetPage(_currentPageNumber, new Bitmap(rendered.Bitmap), rendered.PageSizePoints, rendered.RotationDegrees, GetRegionsForCurrentPage());
+            // The selector owns and disposes this independent display bitmap.
+            _selector.SetPage(pageNumber, new Bitmap(rendered.Bitmap), rendered.PageSizePoints, rendered.RotationDegrees, GetRegionsForCurrentPage());
             _previewStatus.Text = string.Empty;
             UpdateNavigationState();
         }
@@ -236,10 +241,11 @@ public sealed class RegionExtractionView : UserControl
         }
         catch (UserFacingException ex)
         {
-            _renderedPage?.Dispose();
-            _renderedPage = null;
-            _selector.SetPage(_currentPageNumber, null, SizeF.Empty, 0, []);
-            _previewStatus.Text = ex.Message;
+            if (requestVersion == _previewRequestVersion)
+            {
+                // Keep the last valid bitmap visible when a transient renderer error occurs.
+                _previewStatus.Text = ex.Message;
+            }
         }
     }
 

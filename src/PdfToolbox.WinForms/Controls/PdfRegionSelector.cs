@@ -115,6 +115,15 @@ public sealed class PdfRegionSelector : UserControl
         }
     }
 
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+
+        // Regions are stored in normalized page coordinates, so repainting is enough
+        // to place the current image and overlays in the newly calculated viewport.
+        Invalidate();
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
