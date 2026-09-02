@@ -7,5 +7,6 @@ public enum OperationType
     Extract,
     Remove,
     Rotate,
-    BatchSplit
+    BatchSplit,
+    CropRegions
 }

@@ -16,6 +16,8 @@ internal static class Program
         var merger = new PdfMergerService(fileService);
         var pageService = new PdfPageService(fileService);
         var batchSplitter = new PdfBatchSplitService(fileService, splitter);
-        Application.Run(new MainForm(fileService, validation, splitter, merger, pageService, batchSplitter, new LocalLogger()));
+        var previewService = new PdfPagePreviewService();
+        var regionExtraction = new PdfRegionExtractionService(fileService, previewService);
+        Application.Run(new MainForm(fileService, validation, splitter, merger, pageService, batchSplitter, previewService, regionExtraction, new LocalLogger()));
     }
 }

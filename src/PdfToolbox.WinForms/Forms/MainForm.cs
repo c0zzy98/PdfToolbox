@@ -16,6 +16,8 @@ public sealed class MainForm : Form
     private readonly PdfMergerService _merger;
     private readonly PdfPageService _pageService;
     private readonly PdfBatchSplitService _batchSplitter;
+    private readonly PdfPagePreviewService _previewService;
+    private readonly PdfRegionExtractionService _regionExtractionService;
     private readonly LocalLogger _logger;
     private readonly Panel _content = new();
     private readonly Button _backButton = new();
@@ -37,6 +39,7 @@ public sealed class MainForm : Form
     private OperationType? _currentOperation;
     private CancellationTokenSource? _cancellation;
     private int _draggedDocumentIndex = -1;
+    private RegionExtractionView? _regionExtractionView;
 
     public MainForm(
         FileService fileService,
@@ -45,6 +48,8 @@ public sealed class MainForm : Form
         PdfMergerService merger,
         PdfPageService pageService,
         PdfBatchSplitService batchSplitter,
+        PdfPagePreviewService previewService,
+        PdfRegionExtractionService regionExtractionService,
         LocalLogger logger)
     {
         _fileService = fileService;
@@ -53,6 +58,8 @@ public sealed class MainForm : Form
         _merger = merger;
         _pageService = pageService;
         _batchSplitter = batchSplitter;
+        _previewService = previewService;
+        _regionExtractionService = regionExtractionService;
         _logger = logger;
 
         Text = "PDF Toolbox";
@@ -67,8 +74,9 @@ public sealed class MainForm : Form
         ShowHome();
         FormClosing += (_, e) =>
         {
-            if (_cancellation is null) return;
-            _cancellation.Cancel();
+            if (_cancellation is null && (_regionExtractionView?.IsBusy != true)) return;
+            _cancellation?.Cancel();
+            _regionExtractionView?.RequestCancellation();
             e.Cancel = true;
             MessageBox.Show(this, "Najpierw poczekaj na bezpieczne zatrzymanie operacji.", "PDF Toolbox", MessageBoxButtons.OK, MessageBoxIcon.Information);
         };
@@ -118,7 +126,7 @@ public sealed class MainForm : Form
 
     private void ShowHome()
     {
-        if (_cancellation is not null) return;
+        if (_cancellation is not null || _regionExtractionView?.IsBusy == true) return;
         ResetState();
         _backButton.Visible = false;
         _windowTitle.Location = new Point(30, 19);
@@ -144,6 +152,7 @@ public sealed class MainForm : Form
         AddCard(cards, 1, 1, "⌫", "Usuń strony", "Utwórz kopię bez zbędnych stron", OperationType.Remove);
         AddCard(cards, 0, 2, "↻", "Obróć strony", "Popraw kierunek wybranych stron", OperationType.Rotate);
         AddCard(cards, 1, 2, "▦", "Podziel wiele PDF-ów", "Podziel kolejno kilka dokumentów", OperationType.BatchSplit);
+        AddCard(cards, 0, 3, "✂", "Wytnij fragmenty", "Zaznacz obszary strony i zapisz je osobno", OperationType.CropRegions);
         root.Controls.Add(heading);
         root.Controls.Add(cards);
         _content.Controls.Add(root);
@@ -158,6 +167,12 @@ public sealed class MainForm : Form
 
     private void ShowWizard(OperationType operation)
     {
+        if (operation == OperationType.CropRegions)
+        {
+            ShowRegionExtractionWorkflow();
+            return;
+        }
+
         ResetState();
         _currentOperation = operation;
         _backButton.Visible = true;
@@ -219,6 +234,22 @@ public sealed class MainForm : Form
         _progressView.CancelRequested += (_, _) => _cancellation?.Cancel();
         root.Controls.Add(_progressView);
         _content.Controls.Add(root);
+    }
+
+    private void ShowRegionExtractionWorkflow()
+    {
+        ResetState();
+        _currentOperation = OperationType.CropRegions;
+        _backButton.Visible = true;
+        _windowTitle.Location = new Point(82, 19);
+        _content.Controls.Clear();
+        _regionExtractionView = new RegionExtractionView(_fileService, _validation, _previewService, _regionExtractionService, _logger)
+        {
+            Dock = DockStyle.Fill,
+            Margin = new Padding(54, 28, 54, 44)
+        };
+        _regionExtractionView.Completed += (_, result) => ShowSuccess(result);
+        _content.Controls.Add(_regionExtractionView);
     }
 
     private Control BuildMergeControls()
@@ -580,6 +611,7 @@ public sealed class MainForm : Form
         _actionButton = null;
         _progressView = null;
         _dropZone = null;
+        _regionExtractionView = null;
         _outputDirectory = null;
         _currentOperation = null;
     }
@@ -592,6 +624,7 @@ public sealed class MainForm : Form
         OperationType.Remove => ("Usuń strony", "Zaznacz zbędne strony. Oryginał pozostanie bez zmian.", "UTWÓRZ DOKUMENT BEZ STRON", false),
         OperationType.Rotate => ("Obróć strony", "Wybierz strony i kierunek obrotu.", "OBRÓĆ STRONY", false),
         OperationType.BatchSplit => ("Podziel wiele PDF-ów", "Dodaj kilka dokumentów. Zostaną podzielone kolejno i bezpiecznie.", "PODZIEL DOKUMENTY", true),
+        OperationType.CropRegions => ("Wytnij fragmenty", "Zaznacz prostokątne obszary na stronie i zapisz każdy osobno.", "WYTNIJ ZAZNACZONE FRAGMENTY", false),
         _ => throw new ArgumentOutOfRangeException(nameof(operation))
     };
 
@@ -602,6 +635,7 @@ public sealed class MainForm : Form
         OperationType.Extract => "Zapisywanie wybranych stron",
         OperationType.Remove => "Tworzenie dokumentu bez wybranych stron",
         OperationType.Rotate => "Obracanie stron",
+        OperationType.CropRegions => "Wycinanie fragmentów",
         _ => "Praca nad dokumentem"
     };
 

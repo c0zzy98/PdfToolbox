@@ -8,9 +8,9 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
-    <PublishSingleFile>true</PublishSingleFile>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishSingleFile>false</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>false</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
     <PublishReadyToRun>true</PublishReadyToRun>
     <DebugType>embedded</DebugType>
     <Version>1.0.0</Version>
@@ -21,6 +21,25 @@
     <PackageReference Include="PDFsharp" Version="6.2.4" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\PdfToolbox.Renderer\PdfToolbox.Renderer.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+  <ItemGroup>
     <None Include="Assets\app-icon.png" CopyToOutputDirectory="Never" />
   </ItemGroup>
+  <Target Name="CopyRendererArtifacts" AfterTargets="Build">
+    <MSBuild Projects="..\PdfToolbox.Renderer\PdfToolbox.Renderer.csproj"
+             Targets="Build"
+             Properties="Configuration=$(Configuration)" />
+    <ItemGroup>
+      <RendererBuildArtifacts Include="..\PdfToolbox.Renderer\bin\$(Configuration)\net8.0-windows\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(RendererBuildArtifacts)"
+          DestinationFiles="@(RendererBuildArtifacts->'$(OutDir)%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="PublishRendererArtifacts" AfterTargets="Publish">
+    <MSBuild Projects="..\PdfToolbox.Renderer\PdfToolbox.Renderer.csproj"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishDir=$(PublishDir)" />
+  </Target>
 </Project>

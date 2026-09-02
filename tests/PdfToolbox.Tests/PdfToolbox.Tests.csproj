@@ -14,5 +14,17 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\PdfToolbox.WinForms\PdfToolbox.WinForms.csproj" />
+    <ProjectReference Include="..\..\src\PdfToolbox.Renderer\PdfToolbox.Renderer.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
+  <Target Name="CopyRendererArtifactsForTests" AfterTargets="Build">
+    <MSBuild Projects="..\..\src\PdfToolbox.Renderer\PdfToolbox.Renderer.csproj"
+             Targets="Build"
+             Properties="Configuration=$(Configuration)" />
+    <ItemGroup>
+      <RendererArtifacts Include="..\..\src\PdfToolbox.Renderer\bin\$(Configuration)\net8.0-windows\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(RendererArtifacts)"
+          DestinationFiles="@(RendererArtifacts->'$(OutDir)%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 </Project>

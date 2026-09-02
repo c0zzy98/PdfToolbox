@@ -1,0 +1,116 @@
+using System.Drawing;
+using PdfToolbox.Helpers;
+using PdfToolbox.Models;
+
+namespace PdfToolbox.Tests;
+
+public sealed class PageCoordinateMapperTests
+{
+    private readonly PageCoordinateMapper _mapper = new();
+
+    [Theory]
+    [InlineData(595, 842, 0, 1000, 800, 0.1, 0.2)]
+    [InlineData(842, 595, 0, 1000, 800, 0.1, 0.2)]
+    [InlineData(595, 842, 90, 1000, 800, 0.1, 0.2)]
+    [InlineData(595, 842, 180, 1000, 800, 0.1, 0.2)]
+    [InlineData(595, 842, 270, 1000, 800, 0.1, 0.2)]
+    public void ScreenToNormalized_MapsVisiblePage(double pageWidth, double pageHeight, int rotation, int clientWidth, int clientHeight, double expectedX, double expectedY)
+    {
+        var pageSize = new SizeF((float)pageWidth, (float)pageHeight);
+        var viewport = _mapper.GetViewport(new Size(clientWidth, clientHeight), pageSize, rotation, fitToWindow: true);
+        var point = new Point(
+            (int)Math.Round(viewport.Bounds.Left + viewport.Bounds.Width * expectedX),
+            (int)Math.Round(viewport.Bounds.Top + viewport.Bounds.Height * expectedY));
+
+        var success = _mapper.TryScreenToNormalized(point, new Size(clientWidth, clientHeight), pageSize, rotation, fitToWindow: true, out var normalized);
+
+        Assert.True(success);
+        Assert.Equal(expectedX, normalized.X, 2);
+        Assert.Equal(expectedY, normalized.Y, 2);
+    }
+
+    [Theory]
+    [InlineData(595, 842, 0, 1200, 500)]
+    [InlineData(595, 842, 0, 500, 1200)]
+    public void ScreenToNormalized_RejectsLetterboxArea(double pageWidth, double pageHeight, int rotation, int clientWidth, int clientHeight)
+    {
+        var pageSize = new SizeF((float)pageWidth, (float)pageHeight);
+        var viewport = _mapper.GetViewport(new Size(clientWidth, clientHeight), pageSize, rotation, fitToWindow: true);
+        var point = viewport.Bounds.Width < clientWidth
+            ? new Point((int)Math.Max(0, viewport.Bounds.Left - 5), clientHeight / 2)
+            : new Point(clientWidth / 2, (int)Math.Max(0, viewport.Bounds.Top - 5));
+
+        var success = _mapper.TryScreenToNormalized(point, new Size(clientWidth, clientHeight), pageSize, rotation, fitToWindow: true, out _);
+
+        Assert.False(success);
+    }
+
+    [Fact]
+    public void NormalizedToBitmap_MapsToExpectedRectangle()
+    {
+        var region = new PageRegionSelection(1, 0.10, 0.20, 0.70, 0.18);
+
+        var bitmap = _mapper.NormalizedToBitmap(region, new Size(2000, 3000));
+
+        Assert.Equal(new Rectangle(200, 600, 1400, 540), bitmap);
+    }
+
+    [Fact]
+    public void CreateSelection_HandlesReversedDrag()
+    {
+        var pageSize = new SizeF(595, 842);
+        var viewport = _mapper.GetViewport(new Size(1000, 800), pageSize, 0, fitToWindow: true);
+        var start = new Point((int)viewport.Bounds.Right - 100, (int)viewport.Bounds.Bottom - 80);
+        var end = new Point((int)viewport.Bounds.Left + 100, (int)viewport.Bounds.Top + 80);
+
+        var selection = _mapper.CreateSelection(1, start, end, new Size(1000, 800), pageSize, 0, fitToWindow: true);
+
+        Assert.NotNull(selection);
+        Assert.True(selection!.Width > 0);
+        Assert.True(selection.Height > 0);
+    }
+
+    [Fact]
+    public void CreateSelection_ClampsToVisiblePage()
+    {
+        var pageSize = new SizeF(595, 842);
+        var viewport = _mapper.GetViewport(new Size(1000, 800), pageSize, 0, fitToWindow: true);
+        var start = new Point((int)viewport.Bounds.Left + 20, (int)viewport.Bounds.Top + 20);
+        var end = new Point(5000, 5000);
+
+        var selection = _mapper.CreateSelection(1, start, end, new Size(1000, 800), pageSize, 0, fitToWindow: true);
+
+        Assert.NotNull(selection);
+        Assert.True(selection!.X >= 0);
+        Assert.True(selection.Y >= 0);
+        Assert.True(selection.X + selection.Width <= 1);
+        Assert.True(selection.Y + selection.Height <= 1);
+    }
+
+    [Theory]
+    [InlineData(0, 100)]
+    [InlineData(100, 0)]
+    [InlineData(5, 5)]
+    public void CreateSelection_RejectsZeroAndMicroSelections(int widthPixels, int heightPixels)
+    {
+        var pageSize = new SizeF(595, 842);
+        var viewport = _mapper.GetViewport(new Size(1000, 800), pageSize, 0, fitToWindow: true);
+        var start = new Point((int)viewport.Bounds.Left + 40, (int)viewport.Bounds.Top + 40);
+        var end = new Point(start.X + widthPixels, start.Y + heightPixels);
+
+        var selection = _mapper.CreateSelection(1, start, end, new Size(1000, 800), pageSize, 0, fitToWindow: true);
+
+        Assert.Null(selection);
+    }
+
+    [Fact]
+    public void Clamp_AdjustsOutsideRegion()
+    {
+        var clamped = PageCoordinateMapper.Clamp(new PageRegionSelection(2, -0.1, 0.9, 0.5, 0.5));
+
+        Assert.Equal(0, clamped.X);
+        Assert.Equal(0.9, clamped.Y, 3);
+        Assert.Equal(0.5, clamped.Width, 3);
+        Assert.Equal(0.1, clamped.Height, 3);
+    }
+}
