@@ -18,7 +18,7 @@
     <Description>Offline PDF splitting and compression utility for Windows.</Description>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="PDFsharp" Version="6.2.4" />
+    <PackageReference Include="PDFsharp" Version="6.5.0" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\PdfToolbox.Renderer\PdfToolbox.Renderer.csproj" ReferenceOutputAssembly="false" />
